@@ -39,6 +39,7 @@ class VigenereCipher : public Cipher {
      * \param inputText the text to encrypt or decrypt
      * \param cipherMode whether to encrypt or decrypt the input text
      * \return the result of applying the cipher to the input text
+     * \exception InvalidKey emitted if the key contains no letters
      */
     std::string applyCipher(const std::string& inputText,
                             const CipherMode cipherMode) const override;

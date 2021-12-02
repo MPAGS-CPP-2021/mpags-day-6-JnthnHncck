@@ -3,12 +3,15 @@
 #include "CipherType.hpp"
 #include "ProcessCommandLine.hpp"
 #include "TransformChar.hpp"
+#include "CustomExceptions.hpp"
 
 #include <cctype>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <future>
+#include <thread>
 
 int main(int argc, char* argv[])
 {
@@ -20,11 +23,10 @@ int main(int argc, char* argv[])
         false, false, "", "", "", CipherMode::Encrypt, CipherType::Caesar};
 
     // Process command line arguments
-    const bool cmdLineStatus{processCommandLine(cmdLineArgs, settings)};
-
-    // Any failure in the argument processing means we can't continue
-    // Use a non-zero return value to indicate failure
-    if (!cmdLineStatus) {
+    try {
+        processCommandLine(cmdLineArgs, settings);
+    } catch (const MissingArgument& e) {
+        std::cerr << "[error] Missing argument: " << e.what() << std::endl;
         return 1;
     }
 
@@ -90,17 +92,57 @@ int main(int argc, char* argv[])
     }
 
     // Request construction of the appropriate cipher
-    auto cipher = cipherFactory(settings.cipherType, settings.cipherKey);
-
-    // Check that the cipher was constructed successfully
-    if (!cipher) {
-        std::cerr << "[error] problem constructing requested cipher"
-                  << std::endl;
+    try {
+        auto testcipher = cipherFactory(settings.cipherType, settings.cipherKey);
+    } catch (const InvalidKey& e) {
+        std::cerr << "[error] Invalid Key: " << e.what() << std::endl;
         return 1;
     }
+    
+    auto cipher = cipherFactory(settings.cipherType, settings.cipherKey);
 
-    // Run the cipher on the input text, specifying whether to encrypt/decrypt
-    const std::string outputText{cipher->applyCipher(inputText, settings.cipherMode)};
+    //we want four threads to start off with
+    size_t nThreads{4};
+    std::vector< std::future< std::string > > futures{};
+
+    size_t inLen{inputText.length()};
+    size_t div{inLen / nThreads};
+    // The final chunk may be larger, as it takes the extra characters when the division is not exact
+    size_t last{div + inLen % nThreads};
+
+    for (size_t i{0}; i < nThreads; i++) {
+        size_t length{0};
+        if (i != (nThreads - 1)) {
+            length = div;
+        } else {
+            length = last;
+        }
+        // Makes a substring, at a postion depending on i
+        std::string chunk{inputText.substr(div * i, length)};
+        // We add a new thread to our thread vector, and then tell it to apply the cipher to its chunk
+        futures.push_back( std::async(std::launch::async, [&cipher, chunk, &settings] () { return(cipher->applyCipher(chunk, settings.cipherMode)); } ));
+    }
+
+    // We iterate over each future in the vector, and only move on to the next when they are finished
+    for (auto& f : futures) {
+        std::future_status status{std::future_status::ready};
+        do {
+            //We check if the future is done every second
+            status = f.wait_for(std::chrono::seconds(1));
+            if (status == std::future_status::timeout) {
+                std::cout << "Thread waiting..." << std::endl;
+            } else if (status == std::future_status::ready) {
+                std::cout << "Thread complete!" << std::endl;
+            }
+        } while (status != std::future_status::ready);
+    }
+
+    // Now that all futures are finished, we can safely use all of their outputs
+    std::string outputText{""};
+    for (auto&f : futures) {
+        // Recombines all the encrypted chunks
+        outputText = outputText + f.get();
+    }
 
     // Output the encrypted/decrypted text to stdout/file
     if (!settings.outputFile.empty()) {

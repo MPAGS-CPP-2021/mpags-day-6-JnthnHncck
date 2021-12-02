@@ -10,6 +10,7 @@ add_library(MPAGSCipher STATIC
   CipherFactory.cpp
   CipherMode.hpp
   CipherType.hpp
+  CustomExceptions.hpp
   PlayfairCipher.hpp
   PlayfairCipher.cpp
   ProcessCommandLine.hpp
